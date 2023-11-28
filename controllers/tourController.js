@@ -80,3 +80,85 @@ exports.deleteTour = async (req, res, next) => {
     message: "Successfully deleted the tour!",
   });
 };
+
+exports.getTourStats = async (req, res, next) => {
+  const tourStats = await Tour.aggregate([
+    {
+      $match: {
+        ratingsAverage: { $gte: 1 },
+      },
+    },
+    {
+      $group: {
+        _id: "$difficulty",
+        numberOfTours: { $sum: 1 },
+        numberOfReviews: { $sum: "$ratingsQuantity" },
+        avgRating: { $avg: "$ratingsAverage" },
+        avgPrice: { $avg: "$price" },
+        minPrice: { $min: "$price" },
+        maxPrice: { $max: "$price" },
+      },
+    },
+    {
+      $sort: { avgPrice: -1 }, //1 for ascending, -1 for descending, sort works after group with the values calculted there.
+    },
+  ]);
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      tourStats,
+    },
+  });
+};
+
+exports.getMonthlyTours = async (req, res, next) => {
+  const { year } = req.params;
+
+  const monthlyTours = await Tour.aggregate([
+    {
+      $unwind: "$startDates",
+    },
+
+    {
+      $match: {
+        startDates: {
+          $gte: new Date(`${year}-01-01`),
+          $lte: new Date(`${year}-12-31`),
+        },
+      },
+    },
+
+    {
+      $group: {
+        _id: { $month: "$startDates" },
+        numberOfTours: { $sum: 1 },
+        tours: { $push: "$name" },
+      },
+    },
+
+    {
+      $addFields: { month: "$_id" },
+    },
+
+    {
+      $project: {
+        _id: 0,
+      },
+    },
+
+    {
+      $sort: {
+        numberOfTours: -1,
+      },
+    },
+  ]);
+
+  res.json({
+    status: "success",
+    results: monthlyTours.length,
+    data: {
+      monthlyTours,
+    },
+  });
+};
