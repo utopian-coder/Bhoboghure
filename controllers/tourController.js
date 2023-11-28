@@ -25,9 +25,38 @@ exports.getAllTours = async (req, res, next) => {
     queryString.replace(/\b(gt|lt|gte|lte)\b/g, (match) => `$${match}`) //\b\b for this to run when matches exactly, and g for replacing all
   );
 
-  console.log(queryObject);
-
   const query = Tour.find(queryObject);
+
+  if (req.query.sort) {
+    const sortBy = req.query.sort.split(",").join(" ");
+    query.sort(sortBy);
+  } else {
+    query.sort("-createdAt");
+  }
+
+  if (req.query.fields) {
+    const fields = req.query.fields.split(",").join(" ");
+    query.select(fields);
+  } else {
+    query.select("-__v");
+  }
+
+  if (req.query.page) {
+    const limit = req.query.limit || 5;
+    const page = req.query.page || 1;
+    const skip = (page - 1) * limit;
+
+    const numberOfDocs = await Tour.countDocuments();
+
+    if (skip >= numberOfDocs) {
+      return res.status(404).json({
+        status: "fail",
+        message: "The page doesn't exist!",
+      });
+    }
+
+    query.skip(skip).limit(limit);
+  }
 
   const tours = await query;
 
