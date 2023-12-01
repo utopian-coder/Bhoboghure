@@ -7,6 +7,8 @@ const tourSchema = new Schema(
       type: String,
       required: [true, "A tour must've a name!"],
       unique: true,
+      minLength: 12,
+      maxLength: 45,
     },
 
     duration: {
@@ -22,11 +24,13 @@ const tourSchema = new Schema(
     ratingsAverage: {
       type: Number,
       default: 4.5,
+      max: 5,
     },
 
     ratingsQuantity: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     maxGroupSize: {
