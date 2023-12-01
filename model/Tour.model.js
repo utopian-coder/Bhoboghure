@@ -1,3 +1,4 @@
+const slugify = require("slugify");
 const { Schema, model } = require("mongoose");
 
 const tourSchema = new Schema(
@@ -60,10 +61,30 @@ const tourSchema = new Schema(
     images: [String],
 
     startDates: [Date],
+
+    slug: String,
   },
 
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
 );
+
+tourSchema.virtual("durationInWeeks").get(function () {
+  const durationInDays = this.duration.split(" ").at(0); //duration: '7 days'
+  const weeks = Math.floor(durationInDays / 7);
+  const days = durationInDays % 7;
+
+  return `${weeks}W ${days}D`;
+});
+
+//DOCUMENT MIDDLEWARE: Runs before create() or save()
+tourSchema.pre("save", function (next) {
+  this.slug = slugify(this.name, { lower: true });
+  next();
+});
 
 const Tour = model("Tour", tourSchema);
 
