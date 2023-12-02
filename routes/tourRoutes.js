@@ -1,6 +1,7 @@
 const { Router } = require("express");
 
 const tourController = require("../controllers/tourController");
+const authController = require("../controllers/authController");
 
 const router = Router();
 
@@ -20,6 +21,10 @@ router
   .route("/:id")
   .get(tourController.getTour)
   .patch(tourController.updateTour)
-  .delete(tourController.deleteTour);
+  .delete(
+    authController.protect,
+    authController.restrictTo("admin"),
+    tourController.deleteTour
+  );
 
 module.exports = router;
