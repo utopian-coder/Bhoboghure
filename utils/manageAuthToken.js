@@ -1,6 +1,5 @@
 const { promisify } = require("util");
 const jwt = require("jsonwebtoken");
-const catchAsync = require("./catchAsync");
 
 exports.signToken = (payload) => {
   const token = jwt.sign(payload, process.env.JWT_SECRET, {
