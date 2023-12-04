@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { Schema, model } = require("mongoose");
 const validator = require("validator");
 const bcrypt = require("bcrypt");
@@ -40,6 +41,10 @@ const userSchema = new Schema(
 
     passwordChangedAt: Date,
 
+    passwordResetToken: String,
+
+    passwordResetTokenExpires: Date,
+
     role: {
       type: String,
       enum: {
@@ -74,6 +79,19 @@ userSchema.methods.changedPasswordAfterToken = function (jwtTimestamp) {
 
     return jwtTimestamp < passwordChangeTimestamp;
   }
+};
+
+userSchema.methods.generateResetPasswordToken = function () {
+  const resetToken = crypto.randomBytes(32).toString("hex");
+
+  this.passwordResetToken = crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
+
+  this.passwordResetTokenExpires = Date.now() + 15 * 60 * 1000;
+
+  return resetToken;
 };
 
 const User = model("User", userSchema);
