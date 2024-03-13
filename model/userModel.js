@@ -57,6 +57,13 @@ const userSchema = new Schema(
   { timestamps: true }
 );
 
+userSchema.pre("save", function (next) {
+  if (!this.isModified("password" || this.isNew)) return next();
+
+  // substracting 1s because sometimes JWT is created even before the document is created
+  this.passwordChangedAt = Date.now() - 1000;
+});
+
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 

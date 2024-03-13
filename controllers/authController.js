@@ -1,8 +1,10 @@
+const crypto = require("crypto");
+
 const User = require("../model/userModel");
-const catchAsync = require("../utils/catchAsync");
-const AppError = require("../utils/appError");
-const { signToken, verifyToken } = require("../utils/manageAuthToken");
 const sendEmail = require("../utils/email");
+const AppError = require("../utils/appError");
+const catchAsync = require("../utils/catchAsync");
+const { signToken, verifyToken } = require("../utils/manageAuthToken");
 
 exports.signup = catchAsync(async (req, res, next) => {
   const { name, email, password, passwordConfirm, role } = req.body;
@@ -145,4 +147,60 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   }
 });
 
-exports.resetPassword = catchAsync(async (req, res, next) => {});
+exports.resetPassword = catchAsync(async (req, res, next) => {
+  const { token } = req.params;
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+  const user = await User.findOne({
+    passwordResetToken: hashedToken,
+    passwordResetTokenExpires: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    return next(new AppError("Invalid token or the token has expired!", 400));
+  }
+
+  const { password, passwordConfirm } = req.body;
+
+  user.password = password;
+  user.passwordConfirm = passwordConfirm;
+  user.passwordResetToken = undefined;
+  user.passwordResetTokenExpires = undefined;
+
+  await user.save();
+
+  const authToken = signToken({ id: user._id });
+
+  res.status(200).json({
+    status: "success",
+    authToken,
+  });
+});
+
+exports.updatePassword = async (req, res, next) => {
+  const user = await User.findById(req.user._id).select("+password");
+
+  const { currPassword, newPassword, passwordConfirm } = req.body;
+  const isPasswordCorrect = await user.verifyPassword(
+    user.password,
+    currPassword
+  );
+
+  if (!isPasswordCorrect) {
+    return next(new AppError("Invalid password!", 400));
+  }
+
+  user.passwordConfirm = passwordConfirm;
+  user.password = newPassword;
+  user.save();
+
+  const newAuthToken = signToken({ id: user._id });
+
+  res.status(200).json({
+    status: "success",
+    authToken: newAuthToken,
+    data: {
+      user,
+    },
+  });
+};
