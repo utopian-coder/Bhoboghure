@@ -1,33 +1,111 @@
-//Third party package imports
-const express = require("express");
-const cors = require("cors");
-const cookieParser = require("cookie-parser");
-const morgan = require("morgan");
+const path = require('path');
+const express = require('express');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const mongoSanitize = require('express-mongo-sanitize');
+const xss = require('xss-clean');
+const hpp = require('hpp');
+const cookieParser = require('cookie-parser');
+const bodyParser = require('body-parser');
+const compression = require('compression');
+const cors = require('cors');
 
-//imports from project code
-const tourRouter = require("./routes/tourRoutes");
-const userRouter = require("./routes/userRoutes");
-const globalErrorHandler = require("./controllers/errorController");
-const AppError = require("./utils/appError");
+const AppError = require('./utils/appError');
+const globalErrorHandler = require('./controllers/errorController');
+const tourRouter = require('./routes/tourRoutes');
+const userRouter = require('./routes/userRoutes');
+const reviewRouter = require('./routes/reviewRoutes');
+const bookingRouter = require('./routes/bookingRoutes');
+const bookingController = require('./controllers/bookingController');
+const viewRouter = require('./routes/viewRoutes');
 
-const app = express(); //Creating the express server
+// Start express app
+const app = express();
 
-if (process.env.NODE_ENV === "development") {
-  app.use(morgan("dev"));
+app.enable('trust proxy');
+
+// 1) GLOBAL MIDDLEWARES
+// Implement CORS
+app.use(cors());
+// Access-Control-Allow-Origin *
+// api.natours.com, front-end natours.com
+// app.use(cors({
+//   origin: 'https://www.natours.com'
+// }))
+
+app.options('*', cors());
+// app.options('/api/v1/tours/:id', cors());
+
+// Serving static files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Set security HTTP headers
+app.use(helmet());
+
+// Development logging
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
 }
 
-/*This makes public directory the root for serving static file,
-request can be done to http://localhost:port/path to get the static file.
-app.use(express.static(`${__dirname}/public`));
-*/
+// Limit requests from same API
+const limiter = rateLimit({
+  max: 100,
+  windowMs: 60 * 60 * 1000,
+  message: 'Too many requests from this IP, please try again in an hour!'
+});
+app.use('/api', limiter);
 
-app.use(express.json());
+// Stripe webhook, BEFORE body-parser, because stripe needs the body as stream
+app.post(
+  '/webhook-checkout',
+  bodyParser.raw({ type: 'application/json' }),
+  bookingController.webhookCheckout
+);
 
-app.use("/api/v1/tours", tourRouter);
-app.use("/api/v1/users", userRouter);
+// Body parser, reading data from body into req.body
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(cookieParser());
 
-app.all("*", (req, res, next) => {
-  next(new AppError(`Couldn't find ${req.originalUrl} on this server!`, 404));
+// Data sanitization against NoSQL query injection
+app.use(mongoSanitize());
+
+// Data sanitization against XSS
+app.use(xss());
+
+// Prevent parameter pollution
+app.use(
+  hpp({
+    whitelist: [
+      'duration',
+      'ratingsQuantity',
+      'ratingsAverage',
+      'maxGroupSize',
+      'difficulty',
+      'price'
+    ]
+  })
+);
+
+app.use(compression());
+
+// Test middleware
+app.use((req, res, next) => {
+  req.requestTime = new Date().toISOString();
+  // console.log(req.cookies);
+  next();
+});
+
+// 3) ROUTES
+app.use('/', viewRouter);
+app.use('/api/v1/tours', tourRouter);
+app.use('/api/v1/users', userRouter);
+app.use('/api/v1/reviews', reviewRouter);
+app.use('/api/v1/bookings', bookingRouter);
+
+app.all('*', (req, res, next) => {
+  next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));
 });
 
 app.use(globalErrorHandler);
