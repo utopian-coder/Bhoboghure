@@ -1,179 +1,111 @@
-const Tour = require("../model/tourModel");
-const APIFeatures = require("../utils/apiFeatures");
-const AppError = require("../utils/appError");
-const catchAsync = require("../utils/catchAsync");
+const multer = require('multer');
+const sharp = require('sharp');
+const User = require('./../models/userModel');
+const catchAsync = require('./../utils/catchAsync');
+const AppError = require('./../utils/appError');
+const factory = require('./handlerFactory');
 
-exports.aliasTopTour = (req, res, next) => {
-  req.query = {
-    ...req.query,
-    limit: 3,
-    sort: "price,-ratingsAverage",
-  };
+// const multerStorage = multer.diskStorage({
+//   destination: (req, file, cb) => {
+//     cb(null, 'public/img/users');
+//   },
+//   filename: (req, file, cb) => {
+//     const ext = file.mimetype.split('/')[1];
+//     cb(null, `user-${req.user.id}-${Date.now()}.${ext}`);
+//   }
+// });
+const multerStorage = multer.memoryStorage();
 
+const multerFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image')) {
+    cb(null, true);
+  } else {
+    cb(new AppError('Not an image! Please upload only images.', 400), false);
+  }
+};
+
+const upload = multer({
+  storage: multerStorage,
+  fileFilter: multerFilter
+});
+
+exports.uploadUserPhoto = upload.single('photo');
+
+exports.resizeUserPhoto = catchAsync(async (req, res, next) => {
+  if (!req.file) return next();
+
+  req.file.filename = `user-${req.user.id}-${Date.now()}.jpeg`;
+
+  await sharp(req.file.buffer)
+    .resize(500, 500)
+    .toFormat('jpeg')
+    .jpeg({ quality: 90 })
+    .toFile(`public/img/users/${req.file.filename}`);
+
+  next();
+});
+
+const filterObj = (obj, ...allowedFields) => {
+  const newObj = {};
+  Object.keys(obj).forEach(el => {
+    if (allowedFields.includes(el)) newObj[el] = obj[el];
+  });
+  return newObj;
+};
+
+exports.getMe = (req, res, next) => {
+  req.params.id = req.user.id;
   next();
 };
 
-exports.createTour = catchAsync(async (req, res, next) => {
-  const newTour = await Tour.create({
-    ...req.body,
-  });
-
-  res.status(200).json({
-    status: "success",
-    data: {
-      tour: newTour,
-    },
-  });
-});
-
-exports.getAllTours = catchAsync(async (req, res, next) => {
-  const features = new APIFeatures(Tour.find(), req.query)
-    .filter()
-    .sort()
-    .limitFields()
-    .paginate();
-
-  const tours = await features.query;
-
-  res.status(200).json({
-    status: "success",
-    results: tours.length,
-    data: {
-      tours,
-    },
-  });
-});
-
-exports.getTour = catchAsync(async (req, res, next) => {
-  const { id } = req.params;
-
-  const tour = await Tour.findById(id);
-
-  if (!tour) {
-    return next(new AppError(`There's no tour with this (${id}) ID.`, 404));
+exports.updateMe = catchAsync(async (req, res, next) => {
+  // 1) Create error if user POSTs password data
+  if (req.body.password || req.body.passwordConfirm) {
+    return next(
+      new AppError(
+        'This route is not for password updates. Please use /updateMyPassword.',
+        400
+      )
+    );
   }
 
+  // 2) Filtered out unwanted fields names that are not allowed to be updated
+  const filteredBody = filterObj(req.body, 'name', 'email');
+  if (req.file) filteredBody.photo = req.file.filename;
+
+  // 3) Update user document
+  const updatedUser = await User.findByIdAndUpdate(req.user.id, filteredBody, {
+    new: true,
+    runValidators: true
+  });
+
   res.status(200).json({
-    status: "success",
+    status: 'success',
     data: {
-      tour,
-    },
+      user: updatedUser
+    }
   });
 });
 
-exports.updateTour = catchAsync(async (req, res, next) => {
-  const { id } = req.params;
-
-  const updatedTour = await Tour.findByIdAndUpdate(
-    id,
-    { ...req.body },
-    { new: true, runValidators: true }
-  );
-
-  if (!updatedTour) {
-    return next(new AppError(`There's no tour with this (${id}) ID.`, 404));
-  }
+exports.deleteMe = catchAsync(async (req, res, next) => {
+  await User.findByIdAndUpdate(req.user.id, { active: false });
 
   res.status(204).json({
-    status: "success",
-    data: {
-      updatedTour,
-    },
+    status: 'success',
+    data: null
   });
 });
 
-exports.deleteTour = catchAsync(async (req, res, next) => {
-  const { id } = req.params;
-  const deletedTour = await Tour.findByIdAndDelete(id);
-
-  if (!deletedTour) {
-    return next(new AppError(`There's no tour with this (${id}) ID.`, 404));
-  }
-
-  res.status(204).json({
-    status: "success",
-    message: "Successfully deleted the tour!",
+exports.createUser = (req, res) => {
+  res.status(500).json({
+    status: 'error',
+    message: 'This route is not defined! Please use /signup instead'
   });
-});
+};
 
-exports.getTourStats = catchAsync(async (req, res, next) => {
-  const tourStats = await Tour.aggregate([
-    {
-      $match: {
-        ratingsAverage: { $gte: 1 },
-      },
-    },
-    {
-      $group: {
-        _id: "$difficulty",
-        numberOfTours: { $sum: 1 },
-        numberOfReviews: { $sum: "$ratingsQuantity" },
-        avgRating: { $avg: "$ratingsAverage" },
-        avgPrice: { $avg: "$price" },
-        minPrice: { $min: "$price" },
-        maxPrice: { $max: "$price" },
-      },
-    },
-    {
-      $sort: { avgPrice: -1 }, //1 for ascending, -1 for descending, sort works after group with the values calculted there.
-    },
-  ]);
+exports.getUser = factory.getOne(User);
+exports.getAllUsers = factory.getAll(User);
 
-  res.status(200).json({
-    status: "success",
-    data: {
-      tourStats,
-    },
-  });
-});
-
-exports.getMonthlyTours = catchAsync(async (req, res, next) => {
-  const { year } = req.params;
-
-  const monthlyTours = await Tour.aggregate([
-    {
-      $unwind: "$startDates",
-    },
-
-    {
-      $match: {
-        startDates: {
-          $gte: new Date(`${year}-01-01`),
-          $lte: new Date(`${year}-12-31`),
-        },
-      },
-    },
-
-    {
-      $group: {
-        _id: { $month: "$startDates" },
-        numberOfTours: { $sum: 1 },
-        tours: { $push: "$name" },
-      },
-    },
-
-    {
-      $addFields: { month: "$_id" },
-    },
-
-    {
-      $project: {
-        _id: 0,
-      },
-    },
-
-    {
-      $sort: {
-        numberOfTours: -1,
-      },
-    },
-  ]);
-
-  res.json({
-    status: "success",
-    results: monthlyTours.length,
-    data: {
-      monthlyTours,
-    },
-  });
-});
+// Do NOT update passwords with this!
+exports.updateUser = factory.updateOne(User);
+exports.deleteUser = factory.deleteOne(User);
